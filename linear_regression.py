@@ -1,6 +1,10 @@
 import tensorflow as tf
 import numpy as np
 import pandas as pd
+from pandas import DataFrame
+
+import input_data_preparation as data_prep
+from tensorflow.keras import layers
 
 
 # @title Define functions to create and train a model, and a plotting function
@@ -29,7 +33,7 @@ def train_model(model, dataset, epochs, label_name, batch_size):
     features = {name: np.array(value) for name, value in dataset.items()}
     label = np.array(features.pop(label_name))
     history = model.fit(x=features, y=label, batch_size=batch_size,
-                        epochs=epochs, shuffle=True)
+                        epochs=epochs, shuffle=True, verbose=0)
 
     # The list of epochs is stored separately from the rest of history.
     epochs = history.epoch
@@ -39,3 +43,53 @@ def train_model(model, dataset, epochs, label_name, batch_size):
     rmse = hist["root_mean_squared_error"]
 
     return epochs, rmse
+
+
+def get_predictions(train_df, test_df, feature_layer, label_name, run_params):
+    # The following variables are the hyperparameters.
+    # label_name = 'IsPM10Exceeded'
+    classification_threshold = 0.4
+
+    metrics = [tf.keras.metrics.RootMeanSquaredError(),
+               tf.keras.metrics.Recall(),
+               tf.keras.metrics.Precision()]
+
+    # Establish the model's topography.
+    my_model = create_model(run_params.learning_rate, feature_layer)
+
+    # Train the model on the training set.
+    epochs, hist = train_model(my_model, train_df, run_params.epochs, label_name, run_params.batch_size)
+
+    print("Model trained")
+    test_features = {name: np.array(value) for name, value in test_df.items()}
+    test_label = np.array(test_features.pop(label_name))  # isolate the label
+
+    print("Evaluating:")
+    my_model.evaluate(x=test_features, y=test_label, batch_size=run_params.batch_size, verbose=1)
+
+    result = my_model.predict(test_features)
+
+    return result
+
+
+def run_algorithm(run_params):
+    output_file_path = 'C:\\Users\\sliwk\\Downloads\\Dane\\Output\\' + run_params.hour_resolution + 'h out.csv'
+    file = open(output_file_path, "a")
+    file.close()
+
+    train_df, train_df_norm, test_df, test_df_norm = data_prep.prepare_data(run_params.training_years, run_params.testing_years, run_params.hour_resolution)
+
+    feature_columns = data_prep.add_feature_columns(train_df)
+
+    feature_layer = layers.DenseFeatures(feature_columns)
+
+    out = DataFrame()
+
+    for predicted_label in run_params.predicted_labels:
+        out[predicted_label] = test_df[predicted_label]
+        linear_regression_pm10_predictions = get_predictions(train_df, test_df, feature_layer, predicted_label, run_params)
+        out[predicted_label + '_prediction'] = linear_regression_pm10_predictions
+
+    out.sort_index(inplace=True)
+    return out
+
